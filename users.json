@@ -16,5 +16,29 @@
     "email": "student",
     "password": "student123",
     "role": "student"
+  },
+  {
+    "id": "admin",
+    "email": "admin@example.com",
+    "password": "admin123",
+    "role": "admin"
+  },
+  {
+    "id": "librarian1",
+    "email": "librarian@example.com",
+    "password": "lib123",
+    "role": "librarian"
+  },
+  {
+    "id": "student1",
+    "email": "student@example.com",
+    "password": "student123",
+    "role": "student"
+  },
+  {
+    "id": "User_7",
+    "email": "librarian1@gmail.com",
+    "password": "lib123",
+    "role": "librarian"
   }
 ]

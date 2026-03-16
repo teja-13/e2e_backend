@@ -11,9 +11,9 @@
   publishedYear: Number,
   language: String (default: "English"),
   pages: Number,
+  price: Number (default: 0, min: 0),
   finePerWeek: Number (default: 0, min: 0),
-  copiesAvailable: Number (default: 1),
-  timestamps: true
+  copiesAvailable: Number (default: 1)
 }
 ```
 
@@ -24,8 +24,7 @@
   studentId: String (required),
   studentEmail: String,
   status: "pending" | "approved" | "rejected" (default: "pending"),
-  approvedAt: Date,
-  timestamps: true
+  approvedAt: Date
 }
 ```
 
@@ -39,8 +38,7 @@
   dueDate: Date (required),
   returned: Boolean (default: false),
   returnDate: Date,
-  fineAmount: Number (default: 0),
-  timestamps: true
+  fineAmount: Number (default: 0)
 }
 ```
 
@@ -65,7 +63,7 @@
       finePerWeek: Number (default: 0, min: 0)
     }
   ],
-  timestamps: true
+  // no auto timestamp fields listed
 }
 ```
 
@@ -76,7 +74,30 @@
   email: String (required, unique),
   password: String (required),
   name: String,
-  role: "admin" | "librarian" (required),
-  timestamps: true
+  role: "admin" | "librarian" (required, enum)
+}
+```
+
+## Registration (models/Registration.js)
+```js
+{
+  name: String,
+  email: String (required, unique),
+  password: String (required),
+  rollNumber: String,
+  branch: String,
+  section: String,
+  role: "student" | "librarian" | "admin" (required, enum),
+  extra: Object
+}
+```
+
+## Notification (models/Notification.js)
+```js
+{
+  student: ObjectId -> Student (required),
+  borrow: ObjectId -> Borrow (required),
+  message: String (required),
+  read: Boolean (default: false)
 }
 ```

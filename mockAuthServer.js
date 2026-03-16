@@ -5,6 +5,27 @@ const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 require("dotenv").config();
 
+// Helper to enforce required environment variables and avoid in-repo secrets
+const requireEnv = (key) => {
+  const value = process.env[key];
+  if (!value) {
+    throw new Error(`${key} is missing. Add it to your .env file.`);
+  }
+  return value;
+};
+
+const ADMIN_ID = process.env.ADMIN_ID || "admin";
+const LIBRARIAN_ID = process.env.LIBRARIAN_ID || "librarian1";
+const STUDENT_ID = process.env.STUDENT_ID || "student1";
+const ADMIN_EMAIL = requireEnv("ADMIN_EMAIL");
+const ADMIN_PASSWORD = requireEnv("ADMIN_PASSWORD");
+const LIBRARIAN_EMAIL = requireEnv("LIBRARIAN_EMAIL");
+const LIBRARIAN_PASSWORD = requireEnv("LIBRARIAN_PASSWORD");
+const STUDENT_EMAIL = requireEnv("STUDENT_EMAIL");
+const STUDENT_PASSWORD = requireEnv("STUDENT_PASSWORD");
+const SECRET_KEY = requireEnv("JWT_SECRET");
+const MONGODB_URI = requireEnv("MONGODB_URI");
+
 const Book = require("./models/Book");
 const Reservation = require("./models/Reservation");
 const Student = require("./models/Student");
@@ -15,9 +36,7 @@ const Notification = require("./models/Notification");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const SECRET_KEY = process.env.JWT_SECRET || "your_jwt_secret_key";
 const USERS_FILE = "users.json";
-const MONGODB_URI = process.env.MONGODB_URI;
 
 app.use(cors());
 app.use(express.json());
@@ -35,19 +54,9 @@ const connectToMongo = async () => {
 // Load users from the temporary JSON file
 const loadUsers = () => {
   const defaultUsers = [
-    { id: "admin", email: "admin", password: "admin123", role: "admin" },
-    {
-      id: "librarian1",
-      email: "librarian",
-      password: "lib123",
-      role: "librarian",
-    },
-    {
-      id: "student1",
-      email: "student",
-      password: "student123",
-      role: "student",
-    },
+    { id: ADMIN_ID, email: ADMIN_EMAIL, password: ADMIN_PASSWORD, role: "admin" },
+    { id: LIBRARIAN_ID, email: LIBRARIAN_EMAIL, password: LIBRARIAN_PASSWORD, role: "librarian" },
+    { id: STUDENT_ID, email: STUDENT_EMAIL, password: STUDENT_PASSWORD, role: "student" },
   ];
 
   if (!fs.existsSync(USERS_FILE)) {
@@ -75,13 +84,8 @@ const saveUsers = (users) => {
 // Ensure default admin/librarian exist in Mongo for login
 const ensureDefaultStaff = async () => {
   const defaults = [
-    { userId: "admin", email: "admin", password: "admin123", role: "admin" },
-    {
-      userId: "librarian1",
-      email: "librarian",
-      password: "lib123",
-      role: "librarian",
-    },
+    { userId: ADMIN_ID, email: ADMIN_EMAIL, password: ADMIN_PASSWORD, role: "admin" },
+    { userId: LIBRARIAN_ID, email: LIBRARIAN_EMAIL, password: LIBRARIAN_PASSWORD, role: "librarian" },
   ];
 
   for (const staff of defaults) {
@@ -97,9 +101,9 @@ const ensureDefaultStaff = async () => {
 const ensureDefaultStudents = async () => {
   const defaults = [
     {
-      studentId: "student1",
-      email: "student",
-      password: "student123",
+      studentId: STUDENT_ID,
+      email: STUDENT_EMAIL,
+      password: STUDENT_PASSWORD,
       name: "Default Student",
       role: "student",
     },
@@ -397,6 +401,29 @@ app.get("/admin/librarians", authenticate(["admin"]), async (req, res) => {
   }
 });
 
+// Delete a librarian (admin only)
+app.delete("/admin/librarians/:id", authenticate(["admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const librarian = await User.findOne({ $or: [{ _id: id }, { userId: id }] });
+    if (!librarian) {
+      return res.status(404).json({ message: "Librarian not found" });
+    }
+
+    await User.deleteOne({ _id: librarian._id });
+
+    // Clean up any pending registration with same email
+    if (librarian.email) {
+      await Registration.deleteMany({ email: librarian.email });
+    }
+
+    res.json({ message: "Librarian removed" });
+  } catch (error) {
+    console.error("Error deleting librarian", error);
+    res.status(500).json({ message: "Unable to delete librarian" });
+  }
+});
+
 // Admin utility: clear all student borrowed data and pending/approved reservations
 app.post(
   "/admin/clear-student-borrows",
@@ -550,6 +577,194 @@ app.put(
   }
 );
 
+// Admin reset student password (no old password required)
+app.put(
+  "/admin/students/:id/password",
+  authenticate(["admin"]),
+  async (req, res) => {
+    try {
+      const { newPassword } = req.body || {};
+      if (!newPassword) {
+        return res.status(400).json({ message: "newPassword is required" });
+      }
+
+      const student = await Student.findOne({ $or: [{ _id: req.params.id }, { studentId: req.params.id }] });
+      if (!student) return res.status(404).json({ message: "Student not found" });
+
+      student.password = newPassword;
+      await student.save();
+
+      res.json({ message: "Student password reset" });
+    } catch (error) {
+      console.error("Error resetting student password", error);
+      res.status(500).json({ message: "Unable to reset password" });
+    }
+  }
+);
+
+// Admin reset librarian password (no old password required)
+app.put(
+  "/admin/librarians/:id/password",
+  authenticate(["admin"]),
+  async (req, res) => {
+    try {
+      const { newPassword } = req.body || {};
+      if (!newPassword) {
+        return res.status(400).json({ message: "newPassword is required" });
+      }
+
+      const librarian = await User.findOne({ $or: [{ _id: req.params.id }, { userId: req.params.id }, { email: req.params.id }], role: "librarian" });
+      if (!librarian) return res.status(404).json({ message: "Librarian not found" });
+
+      librarian.password = newPassword;
+      await librarian.save();
+
+      res.json({ message: "Librarian password reset" });
+    } catch (error) {
+      console.error("Error resetting librarian password", error);
+      res.status(500).json({ message: "Unable to reset password" });
+    }
+  }
+);
+
+// Librarian reset student password (no old password required)
+app.put(
+  "/librarian/students/:id/password",
+  authenticate(["librarian"]),
+  async (req, res) => {
+    try {
+      const { newPassword } = req.body || {};
+      if (!newPassword) {
+        return res.status(400).json({ message: "newPassword is required" });
+      }
+
+      const student = await Student.findOne({ $or: [{ _id: req.params.id }, { studentId: req.params.id }] });
+      if (!student) return res.status(404).json({ message: "Student not found" });
+
+      student.password = newPassword;
+      await student.save();
+
+      res.json({ message: "Student password reset" });
+    } catch (error) {
+      console.error("Error resetting student password (librarian)", error);
+      res.status(500).json({ message: "Unable to reset password" });
+    }
+  }
+);
+
+// Admin analytics summary
+app.get("/admin/analytics/summary", authenticate(["admin"]), async (req, res) => {
+  try {
+    const now = new Date();
+    const start = new Date(now);
+    start.setMonth(start.getMonth() - 5, 1);
+    start.setHours(0, 0, 0, 0);
+
+    const [
+      totalBooks,
+      availableCopiesAgg,
+      totalReservations,
+      pendingReservations,
+      approvedReservations,
+      totalStudents,
+      totalStaff,
+      activeBorrowed,
+      overdueBorrowed,
+      topBorrowed,
+      borrowTrend,
+      overdueRows,
+      activity,
+    ] = await Promise.all([
+      Book.countDocuments({}),
+      Book.aggregate([{ $group: { _id: null, value: { $sum: "$copiesAvailable" } } }]),
+      Reservation.countDocuments({}),
+      Reservation.countDocuments({ status: "pending" }),
+      Reservation.countDocuments({ status: "approved" }),
+      Student.countDocuments({}),
+      User.countDocuments({ role: { $in: ["admin", "librarian"] } }),
+      Borrow.countDocuments({ returned: false }),
+      Borrow.countDocuments({ returned: false, dueDate: { $lt: new Date() } }),
+      Borrow.aggregate([
+        { $group: { _id: "$book", borrows: { $sum: 1 } } },
+        { $sort: { borrows: -1 } },
+        { $limit: 5 },
+        {
+          $lookup: {
+            from: "books",
+            localField: "_id",
+            foreignField: "_id",
+            as: "book",
+          },
+        },
+        { $unwind: { path: "$book", preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            _id: 0,
+            title: { $ifNull: ["$book.title", "Unknown"] },
+            borrows: 1,
+          },
+        },
+      ]),
+      Borrow.aggregate([
+        { $match: { borrowedAt: { $gte: start } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m", date: "$borrowedAt" } },
+            borrows: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+      Borrow.find({ returned: false, dueDate: { $lt: new Date() } })
+        .populate("book")
+        .populate("student")
+        .sort({ dueDate: 1 })
+        .limit(5)
+        .lean(),
+      Notification.find({})
+        .sort({ createdAt: -1 })
+        .limit(6)
+        .lean(),
+    ]);
+
+    const availabilityAgg = availableCopiesAgg?.[0]?.value || 0;
+
+    const overdueRowsFormatted = (overdueRows || []).map((o) => ({
+      title: o.book?.title || "Unknown",
+      borrower: o.student?.email || o.student?.studentId || "student",
+      dueDate: o.dueDate ? new Date(o.dueDate).toISOString().slice(0, 10) : "-",
+      daysOverdue: o.dueDate ? Math.ceil((Date.now() - new Date(o.dueDate).getTime()) / (1000 * 60 * 60 * 24)) : 0,
+      fineDue: calculateFine(o.dueDate, o.book?.price),
+    }));
+
+    const activityFormatted = (activity || []).map((a) => ({
+      message: a.message,
+      time: a.createdAt ? new Date(a.createdAt).toISOString() : "",
+    }));
+
+    res.json({
+      metrics: {
+        totalBooks,
+        availableCopies: availabilityAgg,
+        totalReservations,
+        pendingReservations,
+        approvedReservations,
+        totalStudents,
+        totalStaff,
+        activeBorrowed,
+        overdueBorrowed,
+      },
+      topBooks: topBorrowed,
+      borrowTrend: borrowTrend.map((b) => ({ month: b._id, borrows: b.borrows })),
+      overdue: overdueRowsFormatted,
+      activity: activityFormatted,
+    });
+  } catch (error) {
+    console.error("Error building admin analytics summary", error);
+    res.status(500).json({ message: "Unable to fetch analytics" });
+  }
+});
+
 app.get(
   "/student/reservations",
   authenticate(["student"]),
@@ -618,6 +833,31 @@ app.get(
     } catch (error) {
       console.error("Error fetching notifications", error);
       res.status(500).json({ message: "Unable to fetch notifications" });
+    }
+  }
+);
+
+// Mark notification as read (and keep it visible to caller if needed)
+app.patch(
+  "/student/notifications/:id/read",
+  authenticate(["student"]),
+  async (req, res) => {
+    try {
+      const studentDoc = await Student.findOne({ studentId: req.user.id }).lean();
+      if (!studentDoc) return res.status(404).json({ message: "Student not found" });
+
+      const updated = await Notification.findOneAndUpdate(
+        { _id: req.params.id, student: studentDoc._id },
+        { $set: { read: true } },
+        { new: true }
+      ).lean();
+
+      if (!updated) return res.status(404).json({ message: "Notification not found" });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error marking notification read", error);
+      res.status(500).json({ message: "Unable to update notification" });
     }
   }
 );
