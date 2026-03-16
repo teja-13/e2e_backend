@@ -1,0 +1,20 @@
+[
+  {
+    "id": "admin",
+    "email": "admin",
+    "password": "admin123",
+    "role": "admin"
+  },
+  {
+    "id": "librarian1",
+    "email": "librarian",
+    "password": "lib123",
+    "role": "librarian"
+  },
+  {
+    "id": "student1",
+    "email": "student",
+    "password": "student123",
+    "role": "student"
+  }
+]
